@@ -19,15 +19,15 @@ package clients
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
+	"github.com/crossplane/terrajet/pkg/terraform"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/terrajet/pkg/terraform"
-
-	"github.com/crossplane-contrib/provider-jet-template/apis/v1alpha1"
+	"github.com/crossplane-contrib/provider-jet-authentik/apis/v1alpha1"
 )
 
 const (
@@ -36,7 +36,11 @@ const (
 	errGetProviderConfig    = "cannot get referenced ProviderConfig"
 	errTrackUsage           = "cannot track ProviderConfig usage"
 	errExtractCredentials   = "cannot extract credentials"
-	errUnmarshalCredentials = "cannot unmarshal template credentials as JSON"
+	errUnmarshalCredentials = "cannot unmarshal authentik credentials as JSON"
+	// provider configuration
+	url      = "AUTHENTIK_URL"
+	token    = "AUTHENTIK_TOKEN"
+	insecure = "true"
 )
 
 // TerraformSetupBuilder builds Terraform a terraform.SetupFn function which
@@ -70,23 +74,36 @@ func TerraformSetupBuilder(version, providerSource, providerVersion string) terr
 			return ps, errors.Wrap(err, errExtractCredentials)
 		}
 		templateCreds := map[string]string{}
+
 		if err := json.Unmarshal(data, &templateCreds); err != nil {
 			return ps, errors.Wrap(err, errUnmarshalCredentials)
 		}
+		authentikCreds := map[string]string{}
+		if err := json.Unmarshal(data, &authentikCreds); err != nil {
+			return ps, errors.Wrap(err, errUnmarshalCredentials)
+		}
 
+		ps.Configuration = map[string]interface{}{}
+		if v, ok := authentikCreds[url]; ok {
+			ps.Configuration[url] = v
+		}
+		if v, ok := authentikCreds[token]; ok {
+			ps.Configuration[token] = v
+		}
+		if v, ok := authentikCreds[insecure]; ok {
+			ps.Configuration[insecure] = v
+		}
 		// set environment variables for sensitive provider configuration
-		// Deprecated: In shared gRPC mode we do not support injecting
-		// credentials via the environment variables. You should specify
-		// credentials via the Terraform main.tf.json instead.
-		/*ps.Env = []string{
-			fmt.Sprintf("%s=%s", "HASHICUPS_USERNAME", templateCreds["username"]),
-			fmt.Sprintf("%s=%s", "HASHICUPS_PASSWORD", templateCreds["password"]),
-		}*/
-		// set credentials in Terraform provider configuration
-		/*ps.Configuration = map[string]interface{}{
-			"username": templateCreds["username"],
-			"password": templateCreds["password"],
-		}*/
+		ps.Env = []string{
+			fmt.Sprintf("%s=%s", url, authentikCreds[url]),
+			fmt.Sprintf("%s=%s", token, authentikCreds[token]),
+			fmt.Sprintf("%s=%s", insecure, authentikCreds[insecure]),
+		}
+		ps.Configuration = map[string]interface{}{
+			"url":      templateCreds["url"],
+			"token":    templateCreds["token"],
+			"insecure": templateCreds["insecure"],
+		}
 		return ps, nil
 	}
 }
